@@ -23,6 +23,7 @@ import shutil
 import signal
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
@@ -187,11 +188,45 @@ def run_one(impl, file: Path, memcheck: bool, reuse: bool = False) -> tuple[dict
 	return r, False
 
 
+# macOS rejects RLIMIT_AS and RLIMIT_DATA, so there the address-space limit is a resident-memory watchdog: the
+# process group is sampled every RSS_POLL_S seconds and killed once its resident memory passes the limit. A
+# kill by the watchdog is recorded like an allocation failure, so the run's verdict is oom.
+RSS_WATCHDOG = sys.platform == "darwin"
+RSS_POLL_S = 0.05
+
+
+def _group_rss(pgid: int) -> int:
+	"""Resident bytes of every process in a process group, from ps."""
+	r = subprocess.run(["/bin/ps", "-A", "-o", "pgid=,rss="], capture_output=True, text=True)
+	return sum(int(rss) * 1024 for g, rss in (line.split() for line in r.stdout.splitlines() if line.strip()) if int(g) == pgid)
+
+
+def _wait_watched(p: subprocess.Popen, timeout_s: float, mem_bytes: int) -> bool:
+	"""Wait for p as Popen.wait(timeout_s) does, killing its group if its resident memory passes mem_bytes.
+	Returns True when the watchdog killed it."""
+	deadline = time.monotonic() + timeout_s
+	while True:
+		try:
+			p.wait(min(RSS_POLL_S, max(deadline - time.monotonic(), 0)))
+			return False
+		except subprocess.TimeoutExpired:
+			if time.monotonic() >= deadline:
+				raise
+			if _group_rss(p.pid) > mem_bytes:
+				try:
+					os.killpg(p.pid, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
+				p.wait()
+				return True
+
+
 def run_limited(argv: list[str], *, cwd: Path, env: dict[str, str], timeout_s: float, mem_bytes: int) -> tuple[int | None, int | None, bool]:
 	"""Run argv in its own process group; return (exit code, terminating signal, timed out)."""
 	def preexec():
 		os.setsid()
-		resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+		if not RSS_WATCHDOG:
+			resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
 		resource.setrlimit(resource.RLIMIT_FSIZE, (FSIZE_LIMIT, FSIZE_LIMIT))
 		resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 	with open(cwd / "stdout", "wb") as so, open(cwd / "stderr", "wb") as se:
@@ -200,6 +235,9 @@ def run_limited(argv: list[str], *, cwd: Path, env: dict[str, str], timeout_s: f
 		except (FileNotFoundError, PermissionError) as e:
 			raise Missing(f"{argv[0]}: {e.strerror}") from None
 		try:
+			if RSS_WATCHDOG and _wait_watched(p, timeout_s, mem_bytes):
+				se.write(f"\nout of memory: resident memory passed {mem_bytes >> 20} MiB (macOS watchdog)\n".encode())
+				return None, signal.SIGKILL, False
 			p.wait(timeout_s)
 		except subprocess.TimeoutExpired:
 			try:

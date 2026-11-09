@@ -266,8 +266,10 @@ executed).
 ## Runner
 
 `run.py` uses Python through `uv`, the standard library where possible, and well-known
-libraries otherwise. By default it tests every implementation it finds on the machine. It's
-Linux only for now.
+libraries otherwise. By default it tests every implementation it finds on the machine. It runs
+on Linux and macOS. macOS has no address-space limit (it refuses `RLIMIT_AS`), so there the same
+memory limit is enforced by sampling each decoder's resident memory and killing it past the limit,
+which the report counts as running out of memory. Apple's Image I/O can only be tested on macOS.
 
 Every run is fresh. Stored results from earlier runs are only for development, only used when
 asked for with `--reuse`, and then only for the same program: a result is keyed on the program

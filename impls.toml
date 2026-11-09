@@ -161,6 +161,16 @@ build = ["javac", "-d", "impls/java", "impls/java/ImageIOShim.java"]
 mem_mb = 4096
 timeout_s = 60
 
+[apple-imageio]
+diagnostics = "image status warnings (WARN when the status at index 0 is short of complete); otherwise errors only"
+project = "apple-imageio"
+variant = "release"
+lineage = "apple"
+notes = "macOS only. Apple Image I/O through CGImageSourceCreateImageAtIndex, the call Preview and Safari make, with the public.png type hint and decoding at creation; the CGImage's own backing bytes are written as decoded, with no drawing into a bitmap context, so no color matching or premultiplication is applied. A status short of complete is a warning, not a rejection, since the system displays such images; a data provider that yields no bytes is a rejection. The version is the macOS version, since Image I/O ships with the system."
+cmd = ["impls/imageio/shim", "{input}", "{output}"]
+version = ["impls/imageio/shim", "--version"]
+build = ["swiftc", "-O", "-o", "impls/imageio/shim", "impls/imageio/main.swift"]
+
 [imagesharp]
 diagnostics = "errors only; no recoverable-warning channel"
 project = "imagesharp"

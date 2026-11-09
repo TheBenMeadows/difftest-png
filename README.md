@@ -35,8 +35,11 @@ and the contents of the files it names, the files beside them and the shared lib
 A change to any of these runs it afresh. A change elsewhere, such as a Python package installed
 in a HEAD build's virtual environment, needs `--rerun`.
 
-Linux only (the runner uses `resource` limits). Needs Python via `uv`; each implementation
-needs its own toolchain:
+Linux and macOS. On Linux each decoder runs under an address-space limit (`RLIMIT_AS`); macOS
+refuses that limit, so there a watchdog samples the decoder's resident memory and kills it past the
+same limit, which records the run as out of memory. valgrind and the `systemd-run` memory cap are
+Linux only, and their passes are skipped where they are missing. Needs Python via `uv`; each
+implementation needs its own toolchain:
 
 | implementations | needs |
 |---|---|
@@ -47,6 +50,7 @@ needs its own toolchain:
 | rust-png, zune-png | cargo |
 | go-png | Go |
 | java-imageio | a JDK |
+| apple-imageio | macOS and the Swift compiler (Xcode or the Command Line Tools) |
 | imagesharp | .NET SDK 9 |
 | fast-png, pngjs, upng | node and npm |
 | chunky_png | ruby and `gem install --user-install chunky_png -v 1.4.0` |
